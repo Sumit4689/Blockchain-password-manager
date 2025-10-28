@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BlockPass - Secure Password Manager</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <!-- Splash / Onboarding Screen -->
+    <div id="onboarding-screen" class="screen active">
+        <div class="logo-container">
+            <div class="logo">🔐</div>
+            <h1 class="app-name">BlockPass</h1>
+            <p class="tagline">Your passwords, encrypted and verified by blockchain.</p>
+        </div>
+        
+        <div class="button-group">
+            <button class="btn btn-primary" id="create-vault-btn">Create New Vault</button>
+            <button class="btn btn-secondary" id="recover-vault-btn">Recover Existing Vault</button>
+        </div>
+    </div>
+
+    <!-- Create Vault Screen -->
+    <div id="create-vault-screen" class="screen">
+        <div class="screen-header">
+            <button class="btn-back" id="back-to-onboarding">←</button>
+            <h2>Create New Vault</h2>
+        </div>
+
+        <div class="form-container">
+            <div class="form-group">
+                <label>Username or Email</label>
+                <input type="text" id="username-input" placeholder="Enter your username or email" class="input-field">
+            </div>
+
+            <div class="mnemonic-section" id="mnemonic-section" style="display: none;">
+                <h3>Your Recovery Phrase</h3>
+                <p class="warning-text">⚠️ Save these 12 words securely. You'll need them to recover your vault.</p>
+                <div class="mnemonic-grid" id="mnemonic-grid"></div>
+                <button class="btn btn-secondary btn-small" id="copy-mnemonic-btn">📋 Copy Recovery Phrase</button>
+                <button class="btn btn-primary" id="confirm-mnemonic-btn">I've saved my recovery phrase</button>
+            </div>
+
+            <div class="auth-method-section" id="auth-method-section" style="display: none;">
+                <h3>Choose Authentication Method</h3>
+                <div class="radio-group">
+                    <label class="radio-option">
+                        <input type="radio" name="auth-method" value="biometric" checked>
+                        <span class="radio-label">
+                            <span class="icon">👆</span>
+                            <span>Biometric (WebAuthn)</span>
+                        </span>
+                    </label>
+                    <label class="radio-option">
+                        <input type="radio" name="auth-method" value="pin">
+                        <span class="radio-label">
+                            <span class="icon">🔢</span>
+                            <span>PIN</span>
+                        </span>
+                    </label>
+                    <label class="radio-option">
+                        <input type="radio" name="auth-method" value="usb">
+                        <span class="radio-label">
+                            <span class="icon">🔑</span>
+                            <span>USB Security Key</span>
+                        </span>
+                    </label>
+                </div>
+
+                <div class="pin-setup" id="pin-setup" style="display: none;">
+                    <input type="password" id="pin-input" placeholder="Enter 6-digit PIN" maxlength="6" class="input-field">
+                    <input type="password" id="pin-confirm" placeholder="Confirm PIN" maxlength="6" class="input-field">
+                </div>
+
+                <button class="btn btn-primary" id="continue-dashboard-btn">Continue to Dashboard</button>
+            </div>
+
+            <button class="btn btn-primary" id="generate-mnemonic-btn">Generate Recovery Phrase</button>
+        </div>
+    </div>
+
+    <!-- Recover Vault Screen -->
+    <div id="recover-vault-screen" class="screen">
+        <div class="screen-header">
+            <button class="btn-back" id="back-to-onboarding-2">←</button>
+            <h2>Recover Vault</h2>
+        </div>
+
+        <div class="form-container">
+            <div class="form-group">
+                <label>Enter Your 12-Word Recovery Phrase</label>
+                <textarea id="recover-mnemonic-input" rows="4" placeholder="word1 word2 word3..." class="input-field"></textarea>
+            </div>
+
+            <div class="form-group">
+                <label>LAN Backup Server IP (Optional)</label>
+                <input type="text" id="backup-server-ip" placeholder="192.168.1.100:3000" class="input-field">
+            </div>
+
+            <button class="btn btn-primary" id="recover-vault-submit-btn">Recover Vault</button>
+        </div>
+    </div>
+
+    <!-- Main Dashboard -->
+    <div id="dashboard-screen" class="screen">
+        <div class="dashboard-header">
+            <div class="header-left">
+                <div class="logo-small">🔐</div>
+                <span class="username-display" id="username-display">User</span>
+            </div>
+            <button class="btn-icon" id="settings-btn">⚙️</button>
+        </div>
+
+        <div class="search-container">
+            <input type="text" id="search-input" placeholder="🔍 Search passwords..." class="input-field search-field">
+        </div>
+
+        <div class="password-list" id="password-list">
+            <!-- Password entries will be added here dynamically -->
+            <div class="empty-state" id="empty-state">
+                <div class="empty-icon">🔒</div>
+                <p>No passwords saved yet</p>
+                <p class="empty-subtext">Click the + button to add your first password</p>
+            </div>
+        </div>
+
+        <div class="backup-status" id="backup-status">
+            <span class="status-indicator">🟢</span>
+            <span class="status-text">Last backup: Never</span>
+        </div>
+
+        <button class="fab" id="add-password-btn">+</button>
+    </div>
+
+    <!-- Add/Edit Password Screen -->
+    <div id="add-edit-screen" class="screen">
+        <div class="screen-header">
+            <button class="btn-back" id="back-to-dashboard">←</button>
+            <h2 id="add-edit-title">Add Password</h2>
+        </div>
+
+        <div class="form-container">
+            <div class="form-group">
+                <label>Website / Domain</label>
+                <input type="text" id="website-input" placeholder="example.com" class="input-field">
+            </div>
+
+            <div class="form-group">
+                <label>Username / Email</label>
+                <input type="text" id="email-input" placeholder="user@example.com" class="input-field">
+            </div>
+
+            <div class="form-group">
+                <label>Password</label>
+                <div class="password-input-group">
+                    <input type="password" id="password-input" placeholder="Enter password" class="input-field">
+                    <button class="btn-icon-small" id="toggle-password-visibility">👁️</button>
+                    <button class="btn-icon-small" id="copy-password-btn">📋</button>
+                </div>
+                <button class="btn btn-secondary btn-small" id="generate-password-btn">⚡ Generate Strong Password</button>
+                <div class="password-strength" id="password-strength">
+                    <div class="strength-bar">
+                        <div class="strength-fill" id="strength-fill"></div>
+                    </div>
+                    <span class="strength-text" id="strength-text">Enter a password</span>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label>Notes (Optional)</label>
+                <textarea id="notes-input" rows="3" placeholder="Additional notes..." class="input-field"></textarea>
+            </div>
+
+            <button class="btn btn-primary" id="save-password-btn">🔒 Encrypt & Save</button>
+            <button class="btn btn-danger" id="delete-password-btn" style="display: none;">🗑️ Delete</button>
+        </div>
+    </div>
+
+    <!-- View Password Screen -->
+    <div id="view-password-screen" class="screen">
+        <div class="screen-header">
+            <button class="btn-back" id="back-to-dashboard-2">←</button>
+            <h2>View Password</h2>
+        </div>
+
+        <div class="auth-prompt" id="auth-prompt">
+            <div class="lock-icon">🔓</div>
+            <p>Authenticate to view password</p>
+            <button class="btn btn-primary" id="authenticate-btn">Unlock Vault</button>
+        </div>
+
+        <div class="password-details" id="password-details" style="display: none;">
+            <div class="detail-card">
+                <div class="detail-row">
+                    <span class="detail-label">Website</span>
+                    <span class="detail-value" id="view-website"></span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">Username</span>
+                    <span class="detail-value" id="view-username"></span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">Password</span>
+                    <span class="detail-value password-revealed" id="view-password"></span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">Notes</span>
+                    <span class="detail-value" id="view-notes"></span>
+                </div>
+            </div>
+
+            <div class="auto-hide-timer" id="auto-hide-timer">
+                Password will auto-hide in <span id="timer-seconds">10</span>s
+            </div>
+
+            <div class="button-group">
+                <button class="btn btn-secondary" id="copy-view-password-btn">📋 Copy</button>
+                <button class="btn btn-primary" id="edit-from-view-btn">✏️ Edit</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Settings Screen -->
+    <div id="settings-screen" class="screen">
+        <div class="screen-header">
+            <button class="btn-back" id="back-to-dashboard-3">←</button>
+            <h2>Settings</h2>
+        </div>
+
+        <div class="settings-container">
+            <div class="settings-section">
+                <h3>Authentication Settings</h3>
+                <button class="btn btn-secondary btn-full" id="change-pin-btn">Change PIN</button>
+                <button class="btn btn-secondary btn-full" id="manage-webauthn-btn">Manage WebAuthn Devices</button>
+            </div>
+
+            <div class="settings-section">
+                <h3>Backup Settings</h3>
+                <div class="form-group">
+                    <label>Friend's Laptop IP</label>
+                    <input type="text" id="backup-ip-input" placeholder="192.168.1.100:3000" class="input-field">
+                </div>
+                <button class="btn btn-primary btn-full" id="sync-now-btn">🔄 Sync Now</button>
+            </div>
+
+            <div class="settings-section">
+                <h3>Blockchain Audit</h3>
+                <label class="toggle-option">
+                    <input type="checkbox" id="audit-toggle">
+                    <span class="toggle-slider"></span>
+                    <span class="toggle-label">Enable Local Audit Logs</span>
+                </label>
+                <div class="audit-info" id="audit-info">
+                    <p class="info-text">Last logged hash: <span id="last-hash">N/A</span></p>
+                    <p class="info-text">Timestamp: <span id="last-timestamp">N/A</span></p>
+                </div>
+            </div>
+
+            <div class="settings-section">
+                <h3>Recovery Info</h3>
+                <button class="btn btn-secondary btn-full" id="show-mnemonic-btn">Show Recovery Phrase</button>
+            </div>
+
+            <div class="settings-section">
+                <h3>Appearance</h3>
+                <label class="toggle-option">
+                    <input type="checkbox" id="theme-toggle" checked>
+                    <span class="toggle-slider"></span>
+                    <span class="toggle-label">Dark Mode</span>
+                </label>
+            </div>
+        </div>
+    </div>
+
+    <!-- Password Generator Modal -->
+    <div id="password-generator-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Generate Password</h3>
+                <button class="btn-close" id="close-generator-modal">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="generated-password-display" id="generated-password-display">
+                    <span id="generated-password-text"></span>
+                    <button class="btn-icon-small" id="copy-generated-btn">📋</button>
+                </div>
+                
+                <div class="form-group">
+                    <label>Length: <span id="password-length-value">16</span></label>
+                    <input type="range" id="password-length-slider" min="8" max="32" value="16" class="slider">
+                </div>
+
+                <label class="checkbox-option">
+                    <input type="checkbox" id="include-uppercase" checked>
+                    <span>Uppercase (A-Z)</span>
+                </label>
+                <label class="checkbox-option">
+                    <input type="checkbox" id="include-lowercase" checked>
+                    <span>Lowercase (a-z)</span>
+                </label>
+                <label class="checkbox-option">
+                    <input type="checkbox" id="include-numbers" checked>
+                    <span>Numbers (0-9)</span>
+                </label>
+                <label class="checkbox-option">
+                    <input type="checkbox" id="include-symbols" checked>
+                    <span>Symbols (!@#$%)</span>
+                </label>
+
+                <button class="btn btn-primary btn-full" id="regenerate-password-btn">🔄 Regenerate</button>
+                <button class="btn btn-secondary btn-full" id="use-password-btn">Use This Password</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Backup Confirmation Modal -->
+    <div id="backup-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Backup to Server</h3>
+            </div>
+            <div class="modal-body">
+                <p>Would you like to backup your vault to the server now?</p>
+                <div class="button-group">
+                    <button class="btn btn-secondary" id="backup-later-btn">Later</button>
+                    <button class="btn btn-primary" id="backup-now-btn">Yes, Backup Now</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="crypto.js"></script>
+    <script src="popup.js"></script>
+</body>
+</html>
