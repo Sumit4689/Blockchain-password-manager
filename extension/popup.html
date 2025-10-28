@@ -24,6 +24,26 @@
         </div>
     </div>
 
+    <!-- Quick Unlock Screen (PIN/Biometric) -->
+    <div id="quick-unlock-screen" class="screen">
+        <div class="logo-container">
+            <div class="logo">🔓</div>
+            <h1 class="app-name">Welcome Back</h1>
+            <p class="tagline">Enter your PIN to unlock your vault</p>
+        </div>
+
+        <div class="form-container">
+            <div class="form-group">
+                <label>Enter PIN</label>
+                <input type="password" id="quick-unlock-pin" placeholder="Enter your 6-digit PIN" class="input-field" maxlength="6" inputmode="numeric">
+            </div>
+
+            <button class="btn btn-primary" id="quick-unlock-btn">🔓 Unlock Vault</button>
+            <button class="btn btn-secondary btn-small" id="use-recovery-phrase-btn">Use Recovery Phrase Instead</button>
+            <button class="btn btn-danger btn-small" id="logout-clear-session-btn">🚪 Clear Session & Logout</button>
+        </div>
+    </div>
+
     <!-- Create Vault Screen -->
     <div id="create-vault-screen" class="screen">
         <div class="screen-header">
@@ -112,7 +132,10 @@
                 <div class="logo-small">🔐</div>
                 <span class="username-display" id="username-display">User</span>
             </div>
-            <button class="btn-icon" id="settings-btn">⚙️</button>
+            <div style="display: flex; gap: 8px;">
+                <button class="btn-icon" id="lock-vault-btn" title="Lock Vault">🔒</button>
+                <button class="btn-icon" id="settings-btn">⚙️</button>
+            </div>
         </div>
 
         <div class="search-container">
@@ -233,9 +256,24 @@
 
         <div class="settings-container">
             <div class="settings-section">
-                <h3>Authentication Settings</h3>
-                <button class="btn btn-secondary btn-full" id="change-pin-btn">Change PIN</button>
-                <button class="btn btn-secondary btn-full" id="manage-webauthn-btn">Manage WebAuthn Devices</button>
+                <h3>Security Settings</h3>
+                
+                <div class="form-group">
+                    <label>Session Timeout</label>
+                    <select id="session-timeout-select" class="input-field">
+                        <option value="0">Never (Stay logged in)</option>
+                        <option value="5">5 minutes</option>
+                        <option value="15" selected>15 minutes</option>
+                        <option value="30">30 minutes</option>
+                        <option value="60">1 hour</option>
+                    </select>
+                    <p style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.5rem;">
+                        Auto-lock vault after inactivity
+                    </p>
+                </div>
+                
+                <button class="btn btn-secondary btn-full" id="change-pin-btn">🔑 Change PIN</button>
+                <button class="btn btn-secondary btn-full" id="manage-webauthn-btn">🔐 Manage WebAuthn Devices</button>
             </div>
 
             <div class="settings-section">
@@ -329,6 +367,34 @@
                     <button class="btn btn-secondary" id="backup-later-btn">Later</button>
                     <button class="btn btn-primary" id="backup-now-btn">Yes, Backup Now</button>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Change PIN Modal -->
+    <div id="change-pin-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Change PIN</h3>
+                <button class="btn-close" id="close-change-pin-modal">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Current PIN</label>
+                    <input type="password" id="current-pin-input" placeholder="Enter current PIN" class="input-field" maxlength="6" inputmode="numeric">
+                </div>
+                <div class="form-group">
+                    <label>New PIN</label>
+                    <input type="password" id="new-pin-input" placeholder="Enter new 6-digit PIN" class="input-field" maxlength="6" inputmode="numeric">
+                </div>
+                <div class="form-group">
+                    <label>Confirm New PIN</label>
+                    <input type="password" id="new-pin-confirm-input" placeholder="Re-enter new PIN" class="input-field" maxlength="6" inputmode="numeric">
+                </div>
+                <p style="font-size: 0.75rem; color: var(--text-muted); margin: 1rem 0;">
+                    ⚠️ Changing your PIN will require re-authentication on all devices.
+                </p>
+                <button class="btn btn-primary btn-full" id="confirm-change-pin-btn">🔑 Change PIN</button>
             </div>
         </div>
     </div>

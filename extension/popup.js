@@ -9,12 +9,20 @@ let vault = {
     backupIP: '',
     auditEnabled: false,
     theme: 'dark',
-    salt: '' // For key derivation
+    salt: '', // For key derivation
+    sessionTimeout: 15 // Timeout in minutes (5, 15, 30, or 0 for never)
 };
 
 let currentPasswordId = null;
 let autoHideTimer = null;
 let masterKey = null; // Cached master encryption key
+let sessionActive = false; // Track if user is currently logged in
+let lastActivityTime = Date.now(); // Track last user activity
+let sessionTimeoutTimer = null; // Timer for auto-lock
+
+// Rate limiting for PIN attempts
+let failedPinAttempts = 0;
+let pinLockoutUntil = 0; // Timestamp when lockout expires
 
 // ===== UTILITY FUNCTIONS =====
 
@@ -72,6 +80,134 @@ function copyToClipboard(text) {
 function showNotification(message) {
     // Could implement a toast notification system
     console.log('Notification:', message);
+}
+
+// ===== SESSION TIMEOUT & ACTIVITY TRACKING =====
+
+/**
+ * Update last activity time and reset session timeout
+ */
+function trackActivity() {
+    if (!sessionActive) return;
+    
+    lastActivityTime = Date.now();
+    resetSessionTimeout();
+}
+
+/**
+ * Reset session timeout timer
+ */
+function resetSessionTimeout() {
+    if (sessionTimeoutTimer) {
+        clearTimeout(sessionTimeoutTimer);
+    }
+    
+    // Don't set timeout if disabled (0) or not logged in
+    if (!sessionActive || !vault.sessionTimeout || vault.sessionTimeout === 0) {
+        return;
+    }
+    
+    const timeoutMs = vault.sessionTimeout * 60 * 1000; // Convert minutes to ms
+    
+    sessionTimeoutTimer = setTimeout(async () => {
+        console.log('Session timeout - auto-locking vault');
+        await lockVault();
+        alert('Session timed out due to inactivity. Please unlock your vault.');
+    }, timeoutMs);
+}
+
+/**
+ * Start tracking user activity for session timeout
+ */
+function startActivityTracking() {
+    // Track mouse movement, clicks, and keyboard input
+    const events = ['mousedown', 'keydown', 'touchstart', 'scroll'];
+    
+    events.forEach(event => {
+        document.addEventListener(event, trackActivity, { passive: true });
+    });
+    
+    resetSessionTimeout();
+}
+
+/**
+ * Stop tracking activity (when locked)
+ */
+function stopActivityTracking() {
+    if (sessionTimeoutTimer) {
+        clearTimeout(sessionTimeoutTimer);
+        sessionTimeoutTimer = null;
+    }
+}
+
+// ===== RATE LIMITING FOR PIN ATTEMPTS =====
+
+/**
+ * Check if PIN attempts are currently locked out
+ * @returns {Object} { locked: boolean, remainingTime: number }
+ */
+function checkPinLockout() {
+    const now = Date.now();
+    
+    if (pinLockoutUntil > now) {
+        const remainingMs = pinLockoutUntil - now;
+        const remainingSec = Math.ceil(remainingMs / 1000);
+        return { locked: true, remainingTime: remainingSec };
+    }
+    
+    return { locked: false, remainingTime: 0 };
+}
+
+/**
+ * Calculate lockout duration based on failed attempts
+ * Exponential backoff: 3 fails = 30s, 5 fails = 5min, 10+ fails = require mnemonic
+ */
+function calculateLockoutDuration(attempts) {
+    if (attempts >= 10) {
+        return 'REQUIRE_MNEMONIC'; // Force recovery phrase
+    } else if (attempts >= 5) {
+        return 5 * 60 * 1000; // 5 minutes
+    } else if (attempts >= 3) {
+        return 30 * 1000; // 30 seconds
+    }
+    return 0;
+}
+
+/**
+ * Handle failed PIN attempt
+ */
+function handleFailedPinAttempt() {
+    failedPinAttempts++;
+    
+    const lockoutDuration = calculateLockoutDuration(failedPinAttempts);
+    
+    if (lockoutDuration === 'REQUIRE_MNEMONIC') {
+        alert(`Too many failed attempts (${failedPinAttempts}). For security, you must use your recovery phrase to unlock.`);
+        clearSession(); // Force full recovery
+        showScreen('recover-vault-screen');
+        return true; // Indicate severe lockout
+    } else if (lockoutDuration > 0) {
+        pinLockoutUntil = Date.now() + lockoutDuration;
+        const seconds = Math.ceil(lockoutDuration / 1000);
+        alert(`Too many failed attempts. Please wait ${seconds} seconds before trying again.`);
+        return false;
+    }
+    
+    // Show remaining attempts before lockout
+    const attemptsUntilLockout = 3 - failedPinAttempts;
+    if (attemptsUntilLockout > 0 && failedPinAttempts > 0) {
+        console.log(`Failed PIN attempt ${failedPinAttempts}. ${attemptsUntilLockout} attempts remaining before lockout.`);
+    }
+    
+    return false;
+}
+
+/**
+ * Reset failed PIN attempts (on successful unlock)
+ */
+function resetPinAttempts() {
+    failedPinAttempts = 0;
+    pinLockoutUntil = 0;
 }
 
 // ===== SCREEN NAVIGATION =====
@@ -189,6 +325,19 @@ document.getElementById('continue-dashboard-btn')?.addEventListener('click', asy
     // Save vault to storage
     await saveVault();
     
+    // Create and store unlock token for quick access
+    if (vault.pin && vault.mnemonic && vault.salt) {
+        try {
+            const unlockToken = await createUnlockToken(vault.mnemonic, vault.salt, vault.pin);
+            await storageSet({ 'blockpass-unlock-token': unlockToken });
+            console.log('Unlock token created and stored');
+        } catch (error) {
+            console.error('Error creating unlock token:', error);
+        }
+    }
+    
+    sessionActive = true;
+    
     // Go to dashboard
     document.getElementById('username-display').textContent = vault.username;
     showScreen('dashboard-screen');
@@ -217,9 +366,103 @@ document.getElementById('recover-vault-submit-btn')?.addEventListener('click', a
         return;
     }
     
+    // Create and store unlock token for future quick access
+    if (vault.pin && vault.mnemonic && vault.salt) {
+        try {
+            const unlockToken = await createUnlockToken(vault.mnemonic, vault.salt, vault.pin);
+            await storageSet({ 'blockpass-unlock-token': unlockToken });
+            console.log('Unlock token created after recovery');
+        } catch (error) {
+            console.error('Error creating unlock token:', error);
+        }
+    }
+    
+    sessionActive = true;
+    
     document.getElementById('username-display').textContent = vault.username || 'User';
     showScreen('dashboard-screen');
     renderPasswordList();
+    
+    // Start activity tracking for session timeout
+    startActivityTracking();
+});
+
+// ===== QUICK UNLOCK (PIN/BIOMETRIC) =====
+
+document.getElementById('quick-unlock-btn')?.addEventListener('click', async () => {
+    const pin = document.getElementById('quick-unlock-pin').value.trim();
+    
+    if (!pin || pin.length !== 6) {
+        alert('Please enter a valid 6-digit PIN');
+        return;
+    }
+    
+    // Check if currently locked out
+    const lockout = checkPinLockout();
+    if (lockout.locked) {
+        alert(`Too many failed attempts. Please wait ${lockout.remainingTime} seconds before trying again.`);
+        return;
+    }
+    
+    try {
+        // Get stored unlock token
+        const result = await storageGet(['blockpass-unlock-token']);
+        
+        if (!result || !result['blockpass-unlock-token']) {
+            alert('No unlock token found. Please use your recovery phrase.');
+            showScreen('recover-vault-screen');
+            return;
+        }
+        
+        // Decrypt unlock token to get mnemonic and vault salt
+        const tokenData = await decryptUnlockToken(result['blockpass-unlock-token'], pin);
+        
+        // Restore vault credentials
+        vault.mnemonic = tokenData.mnemonic;
+        vault.salt = tokenData.vaultSalt;
+        vault.pin = pin;
+        
+        // Load the vault
+        const loaded = await loadVault();
+        
+        if (!loaded) {
+            alert('Failed to load vault. Your data may be corrupted.');
+            return;
+        }
+        
+        // Success! Reset failed attempts and start session
+        resetPinAttempts();
+        sessionActive = true;
+        
+        document.getElementById('username-display').textContent = vault.username || 'User';
+        showScreen('dashboard-screen');
+        renderPasswordList();
+        
+        // Start activity tracking for session timeout
+        startActivityTracking();
+        
+    } catch (error) {
+        console.error('Error during quick unlock:', error);
+        
+        // Handle failed attempt
+        const severeFailure = handleFailedPinAttempt();
+        
+        if (!severeFailure) {
+            alert('Incorrect PIN. Please try again or use your recovery phrase.');
+        }
+    }
+});
+
+document.getElementById('use-recovery-phrase-btn')?.addEventListener('click', () => {
+    showScreen('recover-vault-screen');
+});
+
+document.getElementById('logout-clear-session-btn')?.addEventListener('click', async () => {
+    if (confirm('This will delete your unlock token and you will need to enter your recovery phrase next time. Continue?')) {
+        await clearSession();
+        alert('Session cleared. You will need your recovery phrase to login next time.');
+        showScreen('onboarding-screen');
+    }
 });
 
 // ===== DASHBOARD =====
@@ -237,6 +480,10 @@ document.getElementById('add-password-btn')?.addEventListener('click', () => {
 
 document.getElementById('settings-btn')?.addEventListener('click', () => {
     showScreen('settings-screen');
+});
+
+document.getElementById('lock-vault-btn')?.addEventListener('click', async () => {
+    await lockVault();
 });
 
 document.getElementById('back-to-dashboard')?.addEventListener('click', () => {
@@ -593,11 +840,156 @@ document.getElementById('audit-toggle')?.addEventListener('change', async (e) =>
     await saveVault();
 });
 
+// Session timeout select
+document.getElementById('session-timeout-select')?.addEventListener('change', async (e) => {
+    vault.sessionTimeout = parseInt(e.target.value);
+    await saveVault();
+    
+    // Reset timeout with new duration
+    if (sessionActive) {
+        resetSessionTimeout();
+    }
+    
+    console.log(`Session timeout set to ${vault.sessionTimeout} minutes`);
+});
+
+// Change PIN button
+document.getElementById('change-pin-btn')?.addEventListener('click', () => {
+    if (!sessionActive || !vault.mnemonic) {
+        alert('Please unlock your vault first to change PIN');
+        return;
+    }
+    
+    // Clear inputs and show modal
+    document.getElementById('current-pin-input').value = '';
+    document.getElementById('new-pin-input').value = '';
+    document.getElementById('new-pin-confirm-input').value = '';
+    document.getElementById('change-pin-modal').classList.add('active');
+});
+
+// Close change PIN modal
+document.getElementById('close-change-pin-modal')?.addEventListener('click', () => {
+    document.getElementById('change-pin-modal').classList.remove('active');
+});
+
+// Confirm PIN change
+document.getElementById('confirm-change-pin-btn')?.addEventListener('click', async () => {
+    const currentPin = document.getElementById('current-pin-input').value.trim();
+    const newPin = document.getElementById('new-pin-input').value.trim();
+    const newPinConfirm = document.getElementById('new-pin-confirm-input').value.trim();
+    
+    // Validation
+    if (!currentPin || currentPin.length !== 6) {
+        alert('Please enter your current 6-digit PIN');
+        return;
+    }
+    
+    if (!newPin || newPin.length !== 6) {
+        alert('Please enter a new 6-digit PIN');
+        return;
+    }
+    
+    if (newPin !== newPinConfirm) {
+        alert('New PINs do not match');
+        return;
+    }
+    
+    if (currentPin === newPin) {
+        alert('New PIN must be different from current PIN');
+        return;
+    }
+    
+    try {
+        // Verify current PIN by attempting to decrypt unlock token
+        const result = await storageGet(['blockpass-unlock-token']);
+        
+        if (!result || !result['blockpass-unlock-token']) {
+            alert('No unlock token found. Cannot change PIN.');
+            return;
+        }
+        
+        // Try to decrypt with current PIN (will throw if wrong)
+        await decryptUnlockToken(result['blockpass-unlock-token'], currentPin);
+        
+        // Current PIN is correct, create new unlock token with new PIN
+        const newUnlockToken = await createUnlockToken(vault.mnemonic, vault.salt, newPin);
+        await storageSet({ 'blockpass-unlock-token': newUnlockToken });
+        
+        // Update vault PIN
+        vault.pin = newPin;
+        await saveVault();
+        
+        // Close modal and show success
+        document.getElementById('change-pin-modal').classList.remove('active');
+        alert('PIN changed successfully! Use your new PIN next time you unlock.');
+        
+        console.log('PIN changed successfully');
+        
+    } catch (error) {
+        console.error('Error changing PIN:', error);
+        alert('Current PIN is incorrect. Please try again.');
+    }
+});
+
 // Show mnemonic
 document.getElementById('show-mnemonic-btn')?.addEventListener('click', () => {
     // In production, require authentication first
     alert('Your recovery phrase:\n\n' + vault.mnemonic + '\n\nKeep this safe!');
 });
+
+// ===== SESSION MANAGEMENT =====
+
+/**
+ * Lock the vault - clears sensitive data from memory but keeps unlock token
+ */
+async function lockVault() {
+    // Stop activity tracking
+    stopActivityTracking();
+    
+    // Clear sensitive data from memory
+    vault.mnemonic = '';
+    masterKey = null;
+    sessionActive = false;
+    
+    console.log('Vault locked');
+    
+    // Check if unlock token exists
+    const result = await storageGet(['blockpass-unlock-token']);
+    
+    if (result && result['blockpass-unlock-token']) {
+        // Show quick unlock screen
+        document.getElementById('quick-unlock-pin').value = '';
+        showScreen('quick-unlock-screen');
+    } else {
+        // No unlock token, require full recovery
+        showScreen('recover-vault-screen');
+    }
+}
+
+/**
+ * Clear session - removes unlock token and requires mnemonic on next login
+ */
+async function clearSession() {
+    // Stop activity tracking
+    stopActivityTracking();
+    
+    // Clear sensitive data
+    vault.mnemonic = '';
+    vault.pin = '';
+    masterKey = null;
+    sessionActive = false;
+    
+    // Reset rate limiting
+    resetPinAttempts();
+    
+    // Remove unlock token from storage
+    try {
+        await chrome.storage.local.remove(['blockpass-unlock-token']);
+        console.log('Unlock token removed');
+    } catch (error) {
+        console.error('Error removing unlock token:', error);
+    }
+}
 
 // ===== STORAGE & BACKUP =====
 
@@ -649,7 +1041,8 @@ async function saveVault() {
             backupIP: vault.backupIP,
             auditEnabled: vault.auditEnabled,
             theme: vault.theme,
-            salt: vault.salt
+            salt: vault.salt,
+            sessionTimeout: vault.sessionTimeout
         };
         
         // Encrypt the entire vault
@@ -732,6 +1125,13 @@ async function loadVault() {
         vault.auditEnabled = decryptedVault.auditEnabled || false;
         vault.theme = decryptedVault.theme || 'dark';
         vault.salt = decryptedVault.salt || vault.salt;
+        vault.sessionTimeout = decryptedVault.sessionTimeout !== undefined ? decryptedVault.sessionTimeout : 15;
+        
+        // Update UI for session timeout
+        const timeoutSelect = document.getElementById('session-timeout-select');
+        if (timeoutSelect) {
+            timeoutSelect.value = vault.sessionTimeout.toString();
+        }
         
         // Apply theme
         if (vault.theme === 'light') {
@@ -791,12 +1191,30 @@ function updateBackupStatus(status) {
 // ===== INITIALIZATION =====
 
 document.addEventListener('DOMContentLoaded', async () => {
-    // Try to load existing vault
-    const hasVault = await storageGet(['blockpass-vault']);
+    console.log('BlockPass initializing...');
     
-    if (hasVault && hasVault['blockpass-vault']) {
-        // Vault exists, but we need mnemonic to decrypt
-        // Show recovery screen or auto-login if session is active
-        console.log('Existing vault found. Please enter recovery phrase to unlock.');
+    try {
+        // Check for existing vault and unlock token
+        const storage = await storageGet(['blockpass-vault', 'blockpass-unlock-token']);
+        
+        const hasVault = storage && storage['blockpass-vault'];
+        const hasUnlockToken = storage && storage['blockpass-unlock-token'];
+        
+        if (hasVault && hasUnlockToken) {
+            // Vault exists with unlock token - show quick unlock screen
+            console.log('Vault found with unlock token. Showing quick unlock screen.');
+            showScreen('quick-unlock-screen');
+        } else if (hasVault && !hasUnlockToken) {
+            // Vault exists but no unlock token - require full recovery phrase
+            console.log('Vault found without unlock token. Please enter recovery phrase.');
+            showScreen('recover-vault-screen');
+        } else {
+            // No vault - show onboarding
+            console.log('No vault found. Showing onboarding.');
+            showScreen('onboarding-screen');
+        }
+    } catch (error) {
+        console.error('Initialization error:', error);
+        showScreen('onboarding-screen');
     }
 });

@@ -282,6 +282,91 @@ async function deriveKeyFingerprint(mnemonic, salt = 'blockpass-vault') {
     return fpArray.map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
+/**
+ * Derive an unlock key from PIN for encrypting session tokens
+ * @param {string} pin - User's PIN
+ * @param {string} pinSalt - Salt for PIN derivation
+ * @returns {Promise<CryptoKey>} - Derived unlock key
+ */
+async function deriveUnlockKey(pin, pinSalt) {
+    const encoder = new TextEncoder();
+    
+    const pinKey = await window.crypto.subtle.importKey(
+        'raw',
+        encoder.encode(pin),
+        { name: 'PBKDF2' },
+        false,
+        ['deriveKey']
+    );
+    
+    const unlockKey = await window.crypto.subtle.deriveKey(
+        {
+            name: 'PBKDF2',
+            salt: encoder.encode(pinSalt),
+            iterations: 50000, // Fewer iterations for faster unlock
+            hash: 'SHA-256'
+        },
+        pinKey,
+        { name: 'AES-GCM', length: 256 },
+        false,
+        ['encrypt', 'decrypt']
+    );
+    
+    return unlockKey;
+}
+
+/**
+ * Create an encrypted unlock token from mnemonic and vault salt
+ * This token allows quick unlock with PIN/biometric without re-entering mnemonic
+ * @param {string} mnemonic - User's recovery phrase
+ * @param {string} vaultSalt - Vault's encryption salt
+ * @param {string} pin - User's PIN for token encryption
+ * @returns {Promise<Object>} - Encrypted unlock token with metadata
+ */
+async function createUnlockToken(mnemonic, vaultSalt, pin) {
+    // Generate a unique salt for PIN-based encryption
+    const pinSalt = generateSalt();
+    
+    // Derive unlock key from PIN
+    const unlockKey = await deriveUnlockKey(pin, pinSalt);
+    
+    // Create token data containing mnemonic and vault salt
+    const tokenData = JSON.stringify({
+        mnemonic: mnemonic,
+        vaultSalt: vaultSalt,
+        created: Date.now()
+    });
+    
+    // Encrypt the token
+    const encrypted = await encryptData(tokenData, unlockKey);
+    
+    return {
+        encryptedToken: encrypted,
+        pinSalt: pinSalt,
+        created: Date.now()
+    };
+}
+
+/**
+ * Decrypt an unlock token using PIN to retrieve mnemonic and vault salt
+ * @param {Object} tokenObject - Stored unlock token with encrypted data and pinSalt
+ * @param {string} pin - User's PIN
+ * @returns {Promise<Object>} - Decrypted token data {mnemonic, vaultSalt}
+ */
+async function decryptUnlockToken(tokenObject, pin) {
+    // Derive unlock key from PIN and stored salt
+    const unlockKey = await deriveUnlockKey(pin, tokenObject.pinSalt);
+    
+    // Decrypt the token
+    const tokenDataString = await decryptData(
+        tokenObject.encryptedToken.ciphertext,
+        tokenObject.encryptedToken.iv,
+        unlockKey
+    );
+    
+    return JSON.parse(tokenDataString);
+}
+
 // Export functions
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
@@ -294,6 +379,10 @@ if (typeof module !== 'undefined' && module.exports) {
         encryptVault,
         decryptVault,
         generateSalt,
-        sha256Hash
+        sha256Hash,
+        deriveKeyFingerprint,
+        deriveUnlockKey,
+        createUnlockToken,
+        decryptUnlockToken
     };
 }
