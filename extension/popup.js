@@ -28,7 +28,7 @@ let pinLockoutUntil = 0; // Timestamp when lockout expires
 
 // Note: generateMnemonic is now in crypto.js
 
-// Generate strong password
+// Generate strong password using crypto.getRandomValues() for security
 function generatePassword(length = 16, options = {}) {
     const uppercase = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
     const lowercase = 'abcdefghijklmnopqrstuvwxyz';
@@ -43,28 +43,78 @@ function generatePassword(length = 16, options = {}) {
     
     if (charset === '') charset = lowercase;
     
+    // Use crypto.getRandomValues() for cryptographically secure random generation
     let password = '';
+    const randomValues = new Uint32Array(length);
+    window.crypto.getRandomValues(randomValues);
+    
     for (let i = 0; i < length; i++) {
-        const randomIndex = Math.floor(Math.random() * charset.length);
+        const randomIndex = randomValues[i] % charset.length;
         password += charset[randomIndex];
     }
     return password;
 }
 
-// Calculate password strength
+// Calculate password strength using entropy-based analysis
 function calculatePasswordStrength(password) {
-    if (!password) return { level: 'none', text: 'Enter a password' };
+    if (!password) return { level: 'none', text: 'Enter a password', score: 0, entropy: 0 };
     
+    // Calculate character set size
+    let charsetSize = 0;
+    if (/[a-z]/.test(password)) charsetSize += 26;
+    if (/[A-Z]/.test(password)) charsetSize += 26;
+    if (/\d/.test(password)) charsetSize += 10;
+    if (/[^a-zA-Z0-9]/.test(password)) charsetSize += 32; // Common symbols
+    
+    // Calculate entropy: log2(charsetSize^length)
+    const entropy = password.length * Math.log2(charsetSize || 1);
+    
+    // Additional strength factors
     let strength = 0;
     if (password.length >= 8) strength++;
     if (password.length >= 12) strength++;
+    if (password.length >= 16) strength++;
     if (/[a-z]/.test(password) && /[A-Z]/.test(password)) strength++;
     if (/\d/.test(password)) strength++;
     if (/[^a-zA-Z0-9]/.test(password)) strength++;
     
-    if (strength <= 2) return { level: 'weak', text: 'Weak' };
-    if (strength <= 4) return { level: 'medium', text: 'Medium' };
-    return { level: 'strong', text: 'Strong' };
+    // Check for common patterns (reduces score)
+    if (/(.)\1{2,}/.test(password)) strength--; // Repeated characters
+    if (/^[a-zA-Z]+$/.test(password) || /^\d+$/.test(password)) strength--; // Single type
+    if (/^(password|123456|qwerty|abc123)/i.test(password)) strength -= 2; // Common passwords
+    
+    // Entropy-based classification
+    let level, text, score;
+    if (entropy < 28) {
+        level = 'very-weak';
+        text = 'Very Weak';
+        score = 1;
+    } else if (entropy < 36) {
+        level = 'weak';
+        text = 'Weak';
+        score = 2;
+    } else if (entropy < 60) {
+        level = 'medium';
+        text = 'Medium';
+        score = 3;
+    } else if (entropy < 80) {
+        level = 'strong';
+        text = 'Strong';
+        score = 4;
+    } else {
+        level = 'very-strong';
+        text = 'Very Strong';
+        score = 5;
+    }
+    
+    // Adjust based on strength factors
+    if (strength <= 2) {
+        score = Math.min(score, 2);
+        level = score === 1 ? 'very-weak' : 'weak';
+        text = score === 1 ? 'Very Weak' : 'Weak';
+    }
+    
+    return { level, text, score, entropy: Math.round(entropy) };
 }
 
 // Note: Encryption functions are now in crypto.js and use Web Crypto API
@@ -342,6 +392,12 @@ document.getElementById('continue-dashboard-btn')?.addEventListener('click', asy
     document.getElementById('username-display').textContent = vault.username;
     showScreen('dashboard-screen');
     renderPasswordList();
+    
+    // Start activity tracking for session timeout
+    startActivityTracking();
+    
+    // Check for pending password save
+    checkPendingSave();
 });
 
 // Recover vault
@@ -385,6 +441,9 @@ document.getElementById('recover-vault-submit-btn')?.addEventListener('click', a
     
     // Start activity tracking for session timeout
     startActivityTracking();
+    
+    // Check for pending password save
+    checkPendingSave();
 });
 
 // ===== QUICK UNLOCK (PIN/BIOMETRIC) =====
@@ -441,6 +500,9 @@ document.getElementById('quick-unlock-btn')?.addEventListener('click', async () 
         // Start activity tracking for session timeout
         startActivityTracking();
         
+        // Check for pending password save from content script
+        checkPendingSave();
+        
     } catch (error) {
         console.error('Error during quick unlock:', error);
         
@@ -480,6 +542,14 @@ document.getElementById('add-password-btn')?.addEventListener('click', () => {
 
 document.getElementById('settings-btn')?.addEventListener('click', () => {
     showScreen('settings-screen');
+    
+    // Update blockchain status when opening settings
+    updateBlockchainStatus();
+    
+    // Populate blockchain config if it exists
+    if (typeof BLOCKCHAIN_CONFIG !== 'undefined' && BLOCKCHAIN_CONFIG.contractAddress) {
+        document.getElementById('contract-address-input').value = BLOCKCHAIN_CONFIG.contractAddress;
+    }
 });
 
 document.getElementById('lock-vault-btn')?.addEventListener('click', async () => {
@@ -509,6 +579,11 @@ document.getElementById('search-input')?.addEventListener('input', (e) => {
 function renderPasswordList(searchTerm = '') {
     const passwordList = document.getElementById('password-list');
     const emptyState = document.getElementById('empty-state');
+    
+    // Safety check - don't render if elements don't exist (not on dashboard screen)
+    if (!passwordList || !emptyState) {
+        return;
+    }
     
     const filteredPasswords = vault.passwords.filter(pwd => 
         pwd.website.toLowerCase().includes(searchTerm) ||
@@ -664,7 +739,14 @@ document.getElementById('password-input')?.addEventListener('input', (e) => {
     const strengthText = document.getElementById('strength-text');
     
     strengthFill.className = 'strength-fill ' + strength.level;
-    strengthText.textContent = strength.text;
+    strengthFill.style.width = (strength.score * 20) + '%'; // 0-100%
+    
+    // Show entropy and text
+    if (strength.entropy > 0) {
+        strengthText.textContent = `${strength.text} (${strength.entropy} bits)`;
+    } else {
+        strengthText.textContent = strength.text;
+    }
 });
 
 // Generate password button
@@ -733,8 +815,8 @@ document.getElementById('save-password-btn')?.addEventListener('click', async ()
     }
     
     await saveVault();
-    renderPasswordList();
     showScreen('dashboard-screen');
+    renderPasswordList();
     
     // Show backup modal
     document.getElementById('backup-modal').classList.add('active');
@@ -745,8 +827,8 @@ document.getElementById('delete-password-btn')?.addEventListener('click', async 
     if (confirm('Are you sure you want to delete this password?')) {
         vault.passwords = vault.passwords.filter(pwd => pwd.id !== currentPasswordId);
         await saveVault();
-        renderPasswordList();
         showScreen('dashboard-screen');
+        renderPasswordList();
     }
 });
 
@@ -792,7 +874,12 @@ document.getElementById('use-password-btn')?.addEventListener('click', () => {
     const strengthFill = document.getElementById('strength-fill');
     const strengthText = document.getElementById('strength-text');
     strengthFill.className = 'strength-fill ' + strength.level;
-    strengthText.textContent = strength.text;
+    strengthFill.style.width = (strength.score * 20) + '%';
+    if (strength.entropy > 0) {
+        strengthText.textContent = `${strength.text} (${strength.entropy} bits)`;
+    } else {
+        strengthText.textContent = strength.text;
+    }
     
     document.getElementById('password-generator-modal').classList.remove('active');
 });
@@ -811,6 +898,78 @@ document.getElementById('backup-now-btn')?.addEventListener('click', () => {
 document.getElementById('backup-later-btn')?.addEventListener('click', () => {
     document.getElementById('backup-modal').classList.remove('active');
 });
+
+// ===== AUTO-SAVE PASSWORD MODAL =====
+
+function showAutoSaveModal(pendingData) {
+    document.getElementById('auto-save-website').textContent = pendingData.domain;
+    document.getElementById('auto-save-username').textContent = pendingData.username;
+    document.getElementById('auto-save-modal').classList.add('active');
+    
+    // Store pending data for save action
+    window.currentPendingSave = pendingData;
+}
+
+document.getElementById('close-auto-save-modal')?.addEventListener('click', () => {
+    document.getElementById('auto-save-modal').classList.remove('active');
+    clearPendingSave();
+});
+
+document.getElementById('auto-save-not-now-btn')?.addEventListener('click', () => {
+    document.getElementById('auto-save-modal').classList.remove('active');
+    clearPendingSave();
+});
+
+document.getElementById('auto-save-never-btn')?.addEventListener('click', async () => {
+    // Add to never-save list
+    if (!vault.neverSaveSites) vault.neverSaveSites = [];
+    const domain = window.currentPendingSave?.domain;
+    if (domain && !vault.neverSaveSites.includes(domain)) {
+        vault.neverSaveSites.push(domain);
+        await saveVault();
+    }
+    document.getElementById('auto-save-modal').classList.remove('active');
+    clearPendingSave();
+});
+
+document.getElementById('auto-save-save-btn')?.addEventListener('click', async () => {
+    const pendingData = window.currentPendingSave;
+    if (!pendingData) return;
+    
+    // Encrypt and save the password
+    const encryptedPassword = await encryptPassword(pendingData.password, masterKey);
+    
+    const newPassword = {
+        id: Date.now().toString(),
+        website: pendingData.domain,
+        username: pendingData.username,
+        password: encryptedPassword,
+        notes: `Auto-saved from ${pendingData.url}`,
+        createdAt: new Date().toISOString()
+    };
+    
+    vault.passwords.push(newPassword);
+    await saveVault();
+    
+    showNotification('Password saved successfully!');
+    renderPasswordList();
+    
+    document.getElementById('auto-save-modal').classList.remove('active');
+    clearPendingSave();
+});
+
+async function clearPendingSave() {
+    window.currentPendingSave = null;
+    window.pendingPasswordSave = null;
+    await chrome.storage.local.remove('pendingSave');
+}
+
+// Check for pending save after successful unlock
+function checkPendingSave() {
+    if (window.pendingPasswordSave) {
+        showAutoSaveModal(window.pendingPasswordSave);
+    }
+}
 
 // ===== SETTINGS =====
 
@@ -838,7 +997,110 @@ document.getElementById('theme-toggle')?.addEventListener('change', async (e) =>
 document.getElementById('audit-toggle')?.addEventListener('change', async (e) => {
     vault.auditEnabled = e.target.checked;
     await saveVault();
+    
+    // Update blockchain status
+    updateBlockchainStatus();
 });
+
+// Toggle blockchain configuration section
+document.getElementById('toggle-blockchain-config-btn')?.addEventListener('click', () => {
+    const configSection = document.getElementById('blockchain-config-section');
+    if (configSection.style.display === 'none') {
+        configSection.style.display = 'block';
+    } else {
+        configSection.style.display = 'none';
+    }
+});
+
+// Save blockchain configuration
+document.getElementById('save-blockchain-config-btn')?.addEventListener('click', () => {
+    const contractAddress = document.getElementById('contract-address-input').value.trim();
+    const privateKey = document.getElementById('blockchain-private-key-input').value.trim();
+    
+    if (!contractAddress || !contractAddress.startsWith('0x')) {
+        alert('Please enter a valid contract address (starts with 0x)');
+        return;
+    }
+    
+    if (!privateKey || privateKey.length < 60) {
+        alert('Please enter a valid private key');
+        return;
+    }
+    
+    // Remove 0x prefix if present
+    const cleanPrivateKey = privateKey.startsWith('0x') ? privateKey.slice(2) : privateKey;
+    
+    if (typeof enableBlockchainAudit === 'function') {
+        enableBlockchainAudit(contractAddress, cleanPrivateKey);
+        showNotification('Blockchain configuration saved!');
+        document.getElementById('blockchain-config-section').style.display = 'none';
+        updateBlockchainStatus();
+    } else {
+        alert('Blockchain module not loaded');
+    }
+});
+
+// View audit logs
+document.getElementById('view-audit-logs-btn')?.addEventListener('click', async () => {
+    const modal = document.getElementById('audit-logs-modal');
+    const logsList = document.getElementById('audit-logs-list');
+    
+    modal.classList.add('active');
+    logsList.innerHTML = '<p style="text-align: center; color: var(--text-muted);">Loading audit logs...</p>';
+    
+    if (typeof getAuditLogs === 'function') {
+        try {
+            const logs = await getAuditLogs();
+            
+            if (logs.length === 0) {
+                logsList.innerHTML = '<p style="text-align: center; color: var(--text-muted);">No audit logs found. Make sure blockchain is configured and you\'ve saved your vault.</p>';
+            } else {
+                logsList.innerHTML = logs.map(log => `
+                    <div style="background: rgba(255,255,255,0.05); padding: 1rem; border-radius: 8px; margin-bottom: 0.75rem;">
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
+                            <span style="font-weight: 600; color: var(--accent-primary);">${log.operation}</span>
+                            <span style="font-size: 0.75rem; color: var(--text-muted);">${log.timestamp.toLocaleString()}</span>
+                        </div>
+                        <div style="font-size: 0.75rem; font-family: monospace; word-break: break-all; color: var(--text-muted);">
+                            ${log.hash}
+                        </div>
+                    </div>
+                `).join('');
+            }
+        } catch (error) {
+            logsList.innerHTML = `<p style="text-align: center; color: var(--accent-danger);">Error loading logs: ${error.message}</p>`;
+        }
+    } else {
+        logsList.innerHTML = '<p style="text-align: center; color: var(--accent-danger);">Blockchain module not loaded</p>';
+    }
+});
+
+document.getElementById('close-audit-logs-modal')?.addEventListener('click', () => {
+    document.getElementById('audit-logs-modal').classList.remove('active');
+});
+
+// Update blockchain status in UI
+function updateBlockchainStatus() {
+    const statusSpan = document.getElementById('blockchain-status');
+    if (typeof isBlockchainEnabled === 'function') {
+        if (isBlockchainEnabled()) {
+            statusSpan.textContent = '✅ Configured & Active';
+            statusSpan.style.color = 'var(--accent-success)';
+        } else {
+            statusSpan.textContent = '⚠️ Not configured';
+            statusSpan.style.color = 'var(--accent-warning)';
+        }
+    } else {
+        statusSpan.textContent = '❌ Module not loaded';
+        statusSpan.style.color = 'var(--accent-danger)';
+    }
+}
+
+// Update audit info display
+function updateAuditInfo(hash, timestamp) {
+    document.getElementById('last-hash').textContent = hash ? hash.substring(0, 20) + '...' : 'N/A';
+    document.getElementById('last-timestamp').textContent = timestamp || 'N/A';
+}
 
 // Session timeout select
 document.getElementById('session-timeout-select')?.addEventListener('change', async (e) => {
@@ -929,6 +1191,117 @@ document.getElementById('confirm-change-pin-btn')?.addEventListener('click', asy
         console.error('Error changing PIN:', error);
         alert('Current PIN is incorrect. Please try again.');
     }
+});
+
+// Export vault
+document.getElementById('export-vault-btn')?.addEventListener('click', async () => {
+    try {
+        // Create export data with encrypted passwords
+        const exportData = {
+            version: '1.0',
+            exportedAt: new Date().toISOString(),
+            username: vault.username,
+            passwords: vault.passwords, // Already encrypted
+            salt: vault.salt,
+            sessionTimeout: vault.sessionTimeout,
+            theme: vault.theme,
+            auditEnabled: vault.auditEnabled,
+            backupIP: vault.backupIP
+        };
+        
+        // Encrypt the entire export with master key
+        const exportJSON = JSON.stringify(exportData);
+        const encryptedExport = await encryptData(exportJSON, masterKey);
+        
+        // Create download
+        const blob = new Blob([JSON.stringify({
+            encrypted: encryptedExport,
+            exportedAt: exportData.exportedAt,
+            version: exportData.version
+        }, null, 2)], { type: 'application/json' });
+        
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `blockpass-vault-${Date.now()}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        
+        showNotification('Vault exported successfully!');
+    } catch (error) {
+        console.error('Export error:', error);
+        alert('Failed to export vault: ' + error.message);
+    }
+});
+
+// Import vault
+document.getElementById('import-vault-btn')?.addEventListener('click', () => {
+    document.getElementById('import-file-input').click();
+});
+
+document.getElementById('import-file-input')?.addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    
+    try {
+        const reader = new FileReader();
+        reader.onload = async (event) => {
+            try {
+                const importedData = JSON.parse(event.target.result);
+                
+                if (!importedData.encrypted || !importedData.version) {
+                    alert('Invalid vault file format');
+                    return;
+                }
+                
+                // Decrypt the import
+                const decryptedJSON = await decryptData(importedData.encrypted, masterKey);
+                const importedVault = JSON.parse(decryptedJSON);
+                
+                // Confirm import
+                const confirmMsg = `Import vault data?\n\nUsername: ${importedVault.username}\nPasswords: ${importedVault.passwords?.length || 0}\nExported: ${new Date(importedVault.exportedAt).toLocaleString()}\n\nThis will MERGE with your current vault.`;
+                
+                if (!confirm(confirmMsg)) {
+                    return;
+                }
+                
+                // Merge passwords (avoid duplicates by ID)
+                const existingIds = new Set(vault.passwords.map(p => p.id));
+                const newPasswords = importedVault.passwords.filter(p => !existingIds.has(p.id));
+                
+                vault.passwords.push(...newPasswords);
+                
+                // Update settings if they were exported
+                if (importedVault.sessionTimeout !== undefined) {
+                    vault.sessionTimeout = importedVault.sessionTimeout;
+                }
+                if (importedVault.backupIP) {
+                    vault.backupIP = importedVault.backupIP;
+                }
+                
+                // Save merged vault
+                await saveVault();
+                renderPasswordList();
+                
+                showNotification(`Imported ${newPasswords.length} new passwords!`);
+                
+            } catch (error) {
+                console.error('Import parse error:', error);
+                alert('Failed to import vault: Invalid or corrupted file');
+            }
+        };
+        
+        reader.readAsText(file);
+        
+    } catch (error) {
+        console.error('Import error:', error);
+        alert('Failed to import vault: ' + error.message);
+    }
+    
+    // Reset file input
+    e.target.value = '';
 });
 
 // Show mnemonic
@@ -1067,6 +1440,25 @@ async function saveVault() {
         
         updateBackupStatus('Saved locally');
         console.log('Vault saved and encrypted successfully');
+        
+        // 🔗 BLOCKCHAIN AUDIT LOGGING
+        if (vault.auditEnabled && typeof logVaultToBlockchain === 'function') {
+            try {
+                const encryptedJSON = JSON.stringify(storedVault);
+                const blockchainResult = await logVaultToBlockchain(encryptedJSON, 'save');
+                
+                if (blockchainResult.success) {
+                    console.log('✅ Vault logged to blockchain:', blockchainResult.hash);
+                    updateAuditInfo(blockchainResult.hash, new Date().toLocaleString());
+                } else {
+                    console.warn('⚠️ Blockchain logging failed:', blockchainResult.error);
+                }
+            } catch (blockchainError) {
+                console.error('Blockchain audit error:', blockchainError);
+                // Don't fail the save operation if blockchain logging fails
+            }
+        }
+        
         // Verify storage
         try {
             const verify = await storageGet(['blockpass-vault']);
@@ -1195,19 +1587,30 @@ document.addEventListener('DOMContentLoaded', async () => {
     
     try {
         // Check for existing vault and unlock token
-        const storage = await storageGet(['blockpass-vault', 'blockpass-unlock-token']);
+        const storage = await storageGet(['blockpass-vault', 'blockpass-unlock-token', 'pendingSave']);
         
         const hasVault = storage && storage['blockpass-vault'];
         const hasUnlockToken = storage && storage['blockpass-unlock-token'];
+        const pendingSave = storage && storage['pendingSave'];
         
         if (hasVault && hasUnlockToken) {
             // Vault exists with unlock token - show quick unlock screen
             console.log('Vault found with unlock token. Showing quick unlock screen.');
             showScreen('quick-unlock-screen');
+            
+            // Check for pending password save after unlock
+            if (pendingSave) {
+                // Store for later processing
+                window.pendingPasswordSave = pendingSave;
+            }
         } else if (hasVault && !hasUnlockToken) {
             // Vault exists but no unlock token - require full recovery phrase
             console.log('Vault found without unlock token. Please enter recovery phrase.');
             showScreen('recover-vault-screen');
+            
+            if (pendingSave) {
+                window.pendingPasswordSave = pendingSave;
+            }
         } else {
             // No vault - show onboarding
             console.log('No vault found. Showing onboarding.');

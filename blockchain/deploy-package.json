@@ -1,0 +1,11 @@
+{
+  "name": "blockpass-quick-deploy",
+  "version": "1.0.0",
+  "description": "Quick deployment script for BlockPass blockchain integration",
+  "scripts": {
+    "deploy": "hardhat run scripts/deploy-vault-audit.ts --network ganache",
+    "compile": "hardhat compile",
+    "test": "hardhat test",
+    "clean": "hardhat clean"
+  }
+}

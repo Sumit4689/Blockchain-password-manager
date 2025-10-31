@@ -718,19 +718,24 @@ textarea.input-field {
     border-radius: var(--radius-full);
 }
 
+.strength-fill.very-weak {
+    background: #ff4444;
+}
+
 .strength-fill.weak {
-    width: 33%;
     background: var(--accent-danger);
 }
 
 .strength-fill.medium {
-    width: 66%;
     background: var(--accent-warning);
 }
 
 .strength-fill.strong {
-    width: 100%;
     background: var(--accent-success);
+}
+
+.strength-fill.very-strong {
+    background: linear-gradient(90deg, #00ff88, #00cc66);
 }
 
 .strength-text {

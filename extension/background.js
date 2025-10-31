@@ -32,6 +32,20 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 .catch(error => sendResponse({ success: false, error: error.message }));
             return true;
             
+        case 'autofill':
+            // Handle autofill request from content script
+            handleAutofill(request.domain, sender.tab.id)
+                .then(result => sendResponse({ success: true, data: result }))
+                .catch(error => sendResponse({ success: false, error: error.message }));
+            return true;
+            
+        case 'save-password':
+            // Handle password save request from content script
+            handleSavePassword(request.data)
+                .then(result => sendResponse({ success: true, data: result }))
+                .catch(error => sendResponse({ success: false, error: error.message }));
+            return true;
+            
         default:
             sendResponse({ success: false, error: 'Unknown action' });
     }
@@ -89,3 +103,37 @@ chrome.alarms.onAlarm.addListener((alarm) => {
         });
     }
 });
+
+// Autofill handler
+async function handleAutofill(domain, tabId) {
+    console.log('Autofill requested for:', domain);
+    
+    // Get vault from storage
+    const result = await chrome.storage.local.get(['encryptedVault']);
+    if (!result.encryptedVault) {
+        throw new Error('No vault found');
+    }
+    
+    // Open popup to select credentials (the popup will handle decryption)
+    chrome.action.openPopup();
+    
+    return { domain, tabId };
+}
+
+// Save password handler
+async function handleSavePassword(data) {
+    console.log('Save password requested:', data.domain);
+    
+    // Store temporary credentials for popup to process
+    await chrome.storage.local.set({
+        pendingSave: {
+            ...data,
+            timestamp: Date.now()
+        }
+    });
+    
+    // Open popup or show notification
+    chrome.action.openPopup();
+    
+    return { saved: true };
+}

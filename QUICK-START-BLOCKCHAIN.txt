@@ -1,0 +1,214 @@
+╔══════════════════════════════════════════════════════════════╗
+║         BLOCKPASS BLOCKCHAIN INTEGRATION                      ║
+║              Quick Reference Card                             ║
+╚══════════════════════════════════════════════════════════════╝
+
+┌──────────────────────────────────────────────────────────────┐
+│ 📋 PREREQUISITES                                              │
+└──────────────────────────────────────────────────────────────┘
+  ✓ Node.js & npm installed
+  ✓ Ganache installed and running on port 7545
+  ✓ Chrome/Edge browser
+
+┌──────────────────────────────────────────────────────────────┐
+│ 🚀 DEPLOYMENT STEPS                                           │
+└──────────────────────────────────────────────────────────────┘
+
+  1️⃣  START GANACHE
+      ├─ Open Ganache app
+      ├─ Click "Quickstart Ethereum"
+      └─ Verify RPC Server: HTTP://127.0.0.1:7545
+
+  2️⃣  DEPLOY SMART CONTRACT
+      
+      OPTION A: Hardhat Node (Recommended - Easier)
+      ├─ Terminal 1: npx hardhat node
+      ├─ Terminal 2: cd blockchain
+      ├─ npm install
+      ├─ npx hardhat compile
+      └─ `npx hardhat run scripts/deploy-vault-audit-local.ts --network localhost`
+
+      OPTION B: Ganache (GUI but needs configuration)
+      ├─ cd blockchain
+      ├─ npm install
+      ├─ npx hardhat compile
+      └─ npx hardhat run scripts/deploy-vault-audit.ts --network ganache
+          (If error: See DEPLOYMENT-OPTIONS.md for Ganache setup)
+
+      📝 COPY THE CONTRACT ADDRESS!
+      Example: 0x5FbDB2315678afecb367f032d93F642f64180aa3
+
+  3️⃣  GET PRIVATE KEY
+      
+      OPTION A: From Hardhat Node
+      ├─ Look at the terminal running 'npx hardhat node'
+      ├─ Copy ANY private key (20 accounts shown)
+      └─ Example: ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
+
+      OPTION B: From Ganache
+      ├─ In Ganache, click the 🔑 icon next to any account
+      └─ Copy the private key (64 characters, no 0x)
+
+  4️⃣  CONFIGURE EXTENSION
+      ├─ Open BlockPass extension
+      ├─ Go to Settings → Blockchain Audit
+      ├─ Click "⚙️ Configure Blockchain"
+      ├─ Paste Contract Address
+      ├─ Paste Private Key
+      ├─ Click "💾 Save Configuration"
+      └─ Toggle "Enable Blockchain Audit Logs" ON
+
+  5️⃣  TEST IT
+      ├─ Save a password in BlockPass
+      ├─ Open browser console (F12)
+      ├─ Look for: "✅ Transaction confirmed in block: X"
+      ├─ In Ganache → Transactions tab
+      └─ You should see your transaction!
+
+┌──────────────────────────────────────────────────────────────┐
+│ ⚙️  CONFIGURATION                                             │
+└──────────────────────────────────────────────────────────────┘
+
+  HARDHAT NODE:
+  📍 RPC URL:           http://127.0.0.1:8545
+  📍 Chain ID:          31337
+  📍 Accounts:          20 accounts with 10,000 ETH each
+
+  GANACHE:
+  📍 RPC URL:           http://127.0.0.1:7545
+  📍 Chain ID:          1337 (Ganache default)
+  
+  COMMON:
+  📍 Contract:          VaultAudit.sol
+  📍 Solidity:          ^0.8.0 (compiled with 0.8.19)
+
+┌──────────────────────────────────────────────────────────────┐
+│ 🧪 TESTING COMMANDS                                           │
+└──────────────────────────────────────────────────────────────┘
+
+  # Compile contract
+  npx hardhat compile
+
+  # Deploy to Hardhat node (Recommended)
+  npx hardhat node  # Terminal 1 - keep running
+  npx hardhat run scripts/deploy-vault-audit-local.ts --network localhost
+
+  # Deploy to Ganache (Alternative)
+  npx hardhat run scripts/deploy-vault-audit.ts --network ganache
+
+  # Run tests
+  npx hardhat test
+
+  # Clean build artifacts
+  npx hardhat clean
+
+┌──────────────────────────────────────────────────────────────┐
+│ 🐛 TROUBLESHOOTING                                            │
+└──────────────────────────────────────────────────────────────┘
+
+  ❌ "Network error" / "Connection refused"
+     → Hardhat: Make sure 'npx hardhat node' is running
+     → Ganache: Check Ganache is running on port 7545
+
+  ❌ "Insufficient funds" (Ganache only)
+     → See DEPLOYMENT-OPTIONS.md for mnemonic configuration
+
+  ❌ "Invalid opcode" (FIXED)
+     → We updated to Solidity 0.8.19 (Ganache-compatible)
+     → Run: npx hardhat clean && npx hardhat compile
+
+  ❌ "Blockchain module not loaded"
+     → Check internet connection (ethers.js CDN)
+     → Reload extension
+
+  ❌ "Transaction reverted"
+     → Verify contract address is correct
+     → Ensure account has ETH
+
+  ❌ Audit logs not showing
+     → Toggle "Enable Blockchain Audit Logs" ON
+     → Save a password after enabling
+     → Click "📊 View Audit History"
+
+  💡 TIP: Use Hardhat Node (Option A) - it's easier!
+      See DEPLOYMENT-OPTIONS.md for detailed comparison.
+
+┌──────────────────────────────────────────────────────────────┐
+│ 📊 WHAT GETS LOGGED                                           │
+└──────────────────────────────────────────────────────────────┘
+
+  ✅ LOGGED TO BLOCKCHAIN:
+     • Keccak256 hash of encrypted vault (64 chars)
+     • Your Ethereum address
+     • Block timestamp
+     • Operation type ("save", "update", etc.)
+
+  ❌ NOT LOGGED:
+     • Passwords (encrypted or plain)
+     • Usernames
+     • Vault contents
+     • Recovery phrase
+
+  🔒 PRIVACY: Only the hash is public. Vault data stays local.
+
+┌──────────────────────────────────────────────────────────────┐
+│ 📁 KEY FILES                                                  │
+└──────────────────────────────────────────────────────────────┘
+
+  blockchain/
+    ├─ contracts/VaultAudit.sol        (Smart contract)
+    ├─ scripts/deploy-vault-audit.ts   (Deploy script)
+    └─ hardhat.config.ts               (Network config)
+
+  extension/
+    ├─ blockchain.js                   (Integration module)
+    ├─ popup.js                        (Logging logic)
+    └─ popup.html                      (UI)
+
+┌──────────────────────────────────────────────────────────────┐
+│ 🎯 VERIFICATION EXAMPLE                                       │
+└──────────────────────────────────────────────────────────────┘
+
+  1. Save password → generates hash (e.g., 0xabc123...)
+  2. Hash logged to blockchain at timestamp T1
+  3. Later: load vault → compute hash again
+  4. Fetch blockchain log → compare hashes
+  5. Match = ✅ Vault authentic
+     Mismatch = ❌ Vault tampered!
+
+┌──────────────────────────────────────────────────────────────┐
+│ 💡 PRO TIPS                                                   │
+└──────────────────────────────────────────────────────────────┘
+
+  • Keep Ganache running while using BlockPass
+  • Each save creates a new blockchain transaction
+  • View full audit trail in Settings → View Audit History
+  • Console (F12) shows detailed blockchain activity
+  • Transaction history visible in Ganache "Transactions" tab
+
+┌──────────────────────────────────────────────────────────────┐
+│ 📚 DOCUMENTATION                                              │
+└──────────────────────────────────────────────────────────────┘
+
+  • BLOCKCHAIN-SETUP-GUIDE.md     (Full setup instructions)
+  • BLOCKCHAIN-IMPLEMENTATION.md  (Technical details)
+  • Contract: blockchain/contracts/VaultAudit.sol
+
+┌──────────────────────────────────────────────────────────────┐
+│ ⚡ QUICK DEPLOY (ONE-LINER)                                   │
+└──────────────────────────────────────────────────────────────┘
+
+  OPTION A: Hardhat Node (Recommended)
+  Terminal 1: cd blockchain && npx hardhat node
+  Terminal 2: cd blockchain && npx hardhat run scripts/deploy-vault-audit-local.ts --network localhost
+
+  OPTION B: Ganache
+  cd blockchain && npx hardhat run scripts/deploy-vault-audit.ts --network ganache
+
+  Then copy the contract address and configure in extension!
+
+╔══════════════════════════════════════════════════════════════╗
+║  🎉 READY TO AUDIT YOUR VAULT ON THE BLOCKCHAIN!  🎉         ║
+║                                                               ║
+║  📚 For detailed setup options, see DEPLOYMENT-OPTIONS.md    ║
+╚══════════════════════════════════════════════════════════════╝
