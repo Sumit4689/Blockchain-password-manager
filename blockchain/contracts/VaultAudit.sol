@@ -3,8 +3,8 @@ pragma solidity ^0.8.0;
 
 /**
  * @title VaultAudit
- * @dev Blockchain-based audit logging for BlockPass password vault
- * @notice This contract stores tamper-proof hashes of encrypted vault states
+ * @dev Blockchain-based audit logging for BlockPass password vault with IPFS integration
+ * @notice This contract stores tamper-proof hashes and IPFS CIDs of encrypted vault states
  */
 contract VaultAudit {
     // Event emitted when a vault hash is logged
@@ -12,7 +12,8 @@ contract VaultAudit {
         bytes32 indexed vaultHash,
         address indexed user,
         uint256 timestamp,
-        string operation
+        string operation,
+        string ipfsCID
     );
 
     // Struct to store audit log details
@@ -21,6 +22,7 @@ contract VaultAudit {
         address user;
         uint256 timestamp;
         string operation;
+        string ipfsCID;        // IPFS Content Identifier for decentralized backup
     }
 
     // Mapping from user address to their audit logs
@@ -30,11 +32,21 @@ contract VaultAudit {
     uint256 public totalLogs;
 
     /**
-     * @dev Log a vault hash to the blockchain
+     * @dev Log a vault hash to the blockchain (legacy function without IPFS)
      * @param _hash Keccak256 hash of the encrypted vault
      * @param _operation Type of operation (e.g., "save", "update", "delete")
      */
     function logVault(bytes32 _hash, string memory _operation) external {
+        logVaultWithCID(_hash, "", _operation);
+    }
+
+    /**
+     * @dev Log a vault hash with IPFS CID to the blockchain
+     * @param _hash Keccak256 hash of the encrypted vault
+     * @param _ipfsCID IPFS Content Identifier where encrypted vault is stored
+     * @param _operation Type of operation (e.g., "password_added", "password_deleted", etc.)
+     */
+    function logVaultWithCID(bytes32 _hash, string memory _ipfsCID, string memory _operation) public {
         require(_hash != bytes32(0), "Hash cannot be zero");
         require(bytes(_operation).length > 0, "Operation cannot be empty");
 
@@ -42,13 +54,14 @@ contract VaultAudit {
             vaultHash: _hash,
             user: msg.sender,
             timestamp: block.timestamp,
-            operation: _operation
+            operation: _operation,
+            ipfsCID: _ipfsCID
         });
 
         userAuditLogs[msg.sender].push(newLog);
         totalLogs++;
 
-        emit VaultLogged(_hash, msg.sender, block.timestamp, _operation);
+        emit VaultLogged(_hash, msg.sender, block.timestamp, _operation, _ipfsCID);
     }
 
     /**
@@ -64,7 +77,7 @@ contract VaultAudit {
      * @dev Get a specific audit log for a user
      * @param _user Address of the user
      * @param _index Index of the log
-     * @return AuditLog struct
+     * @return AuditLog struct with vault hash, timestamp, operation, and IPFS CID
      */
     function getUserLog(address _user, uint256 _index)
         external
@@ -109,9 +122,9 @@ contract VaultAudit {
     }
 
     /**
-     * @dev Get the latest audit log for a user
+     * @dev Get the latest audit log for a user (includes IPFS CID for recovery)
      * @param _user Address of the user
-     * @return AuditLog struct
+     * @return AuditLog struct with all details including IPFS CID
      */
     function getLatestLog(address _user)
         external
@@ -120,5 +133,19 @@ contract VaultAudit {
     {
         require(userAuditLogs[_user].length > 0, "No logs found");
         return userAuditLogs[_user][userAuditLogs[_user].length - 1];
+    }
+
+    /**
+     * @dev Get IPFS CID from the latest log (for vault recovery)
+     * @param _user Address of the user
+     * @return string IPFS CID where encrypted vault can be retrieved
+     */
+    function getLatestIPFSCID(address _user)
+        external
+        view
+        returns (string memory)
+    {
+        require(userAuditLogs[_user].length > 0, "No logs found");
+        return userAuditLogs[_user][userAuditLogs[_user].length - 1].ipfsCID;
     }
 }

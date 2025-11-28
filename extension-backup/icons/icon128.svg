@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="g128" x1="0" x2="1">
+      <stop offset="0%" stop-color="#6366f1"/>
+      <stop offset="100%" stop-color="#8b5cf6"/>
+    </linearGradient>
+  </defs>
+  <rect width="128" height="128" rx="20" fill="url(#g128)"/>
+  <path d="M64 32a12 12 0 00-12 12v6h-4a3 3 0 00-3 3v18a3 3 0 003 3h34a3 3 0 003-3V53a3 3 0 00-3-3h-4v-6a12 12 0 00-12-12z" fill="#fff" opacity="0.98"/>
+  <text x="64" y="96" font-family="Poppins, Arial, sans-serif" font-size="16" text-anchor="middle" fill="#ffffff" opacity="0.9">BlockPass</text>
+</svg>

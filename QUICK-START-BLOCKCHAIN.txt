@@ -1,5 +1,5 @@
 ╔══════════════════════════════════════════════════════════════╗
-║         BLOCKPASS BLOCKCHAIN INTEGRATION                      ║
+║         BLOCKPASS BLOCKCHAIN + IPFS INTEGRATION               ║
 ║              Quick Reference Card                             ║
 ╚══════════════════════════════════════════════════════════════╝
 
@@ -9,6 +9,8 @@
   ✓ Node.js & npm installed
   ✓ Ganache installed and running on port 7545
   ✓ Chrome/Edge browser
+  ✓ Pinata account (FREE 1GB - for IPFS backup)
+    → Sign up at: https://app.pinata.cloud/
 
 ┌──────────────────────────────────────────────────────────────┐
 │ 🚀 DEPLOYMENT STEPS                                           │
@@ -49,7 +51,7 @@
       ├─ In Ganache, click the 🔑 icon next to any account
       └─ Copy the private key (64 characters, no 0x)
 
-  4️⃣  CONFIGURE EXTENSION
+  4️⃣  CONFIGURE BLOCKCHAIN
       ├─ Open BlockPass extension
       ├─ Go to Settings → Blockchain Audit
       ├─ Click "⚙️ Configure Blockchain"
@@ -58,10 +60,22 @@
       ├─ Click "💾 Save Configuration"
       └─ Toggle "Enable Blockchain Audit Logs" ON
 
-  5️⃣  TEST IT
+  5️⃣  CONFIGURE IPFS (OPTIONAL but recommended)
+      ├─ In Settings → IPFS Backup section
+      ├─ Click "⚙️ Configure IPFS"
+      ├─ Paste your Pinata JWT token
+      │  (Get it at: https://app.pinata.cloud/developers/api-keys)
+      ├─ Click "💾 Save IPFS Configuration"
+      ├─ Click "🧪 Test Connection"
+      └─ Toggle "Enable IPFS Decentralized Backup" ON
+      
+      📚 Full IPFS guide: See PINATA-SETUP-GUIDE.md
+
+  6️⃣  TEST IT
       ├─ Save a password in BlockPass
       ├─ Open browser console (F12)
       ├─ Look for: "✅ Transaction confirmed in block: X"
+      ├─ If IPFS enabled: "✅ Vault uploaded to Pinata IPFS"
       ├─ In Ganache → Transactions tab
       └─ You should see your transaction!
 
@@ -79,8 +93,10 @@
   📍 Chain ID:          1337 (Ganache default)
   
   COMMON:
-  📍 Contract:          VaultAudit.sol
+  📍 Contract:          VaultAudit.sol (with IPFS CID storage)
   📍 Solidity:          ^0.8.0 (compiled with 0.8.19)
+  📍 IPFS Gateway:      https://gateway.pinata.cloud/ipfs
+  📍 Pinata Dashboard:  https://app.pinata.cloud/
 
 ┌──────────────────────────────────────────────────────────────┐
 │ 🧪 TESTING COMMANDS                                           │
@@ -130,6 +146,17 @@
      → Save a password after enabling
      → Click "📊 View Audit History"
 
+  ❌ IPFS upload failed
+     → Check Pinata JWT token is correct
+     → Click "🧪 Test Connection" to verify
+     → See PINATA-SETUP-GUIDE.md for details
+
+  ❌ IPFS recovery failed
+     → Ensure you have correct 12-word mnemonic
+     → Check CID is valid (starts with "bafy..." or "Qm...")
+     → Wait 1-2 minutes for IPFS propagation
+     → Try manual download: https://gateway.pinata.cloud/ipfs/YOUR_CID
+
   💡 TIP: Use Hardhat Node (Option A) - it's easier!
       See DEPLOYMENT-OPTIONS.md for detailed comparison.
 
@@ -139,59 +166,86 @@
 
   ✅ LOGGED TO BLOCKCHAIN:
      • Keccak256 hash of encrypted vault (64 chars)
+     • IPFS Content ID (CID) if backup enabled
      • Your Ethereum address
      • Block timestamp
-     • Operation type ("save", "update", etc.)
+     • Operation type (password_added, password_updated, etc.)
 
-  ❌ NOT LOGGED:
-     • Passwords (encrypted or plain)
+  ✅ UPLOADED TO IPFS (if enabled):
+     • Encrypted vault (AES-256-GCM encrypted)
+     • Encryption metadata (IV, salt)
+     • Returns permanent CID (e.g., bafybeig...)
+
+  ❌ NOT LOGGED OR UPLOADED:
+     • Passwords (plain or individually encrypted)
      • Usernames
-     • Vault contents
-     • Recovery phrase
+     • Recovery mnemonic
+     • PIN code
 
-  🔒 PRIVACY: Only the hash is public. Vault data stays local.
+  🔒 PRIVACY: Only hash + CID are public. Encrypted vault on IPFS 
+             requires your mnemonic to decrypt.
 
 ┌──────────────────────────────────────────────────────────────┐
 │ 📁 KEY FILES                                                  │
 └──────────────────────────────────────────────────────────────┘
 
   blockchain/
-    ├─ contracts/VaultAudit.sol        (Smart contract)
+    ├─ contracts/VaultAudit.sol        (Smart contract with IPFS)
     ├─ scripts/deploy-vault-audit.ts   (Deploy script)
     └─ hardhat.config.ts               (Network config)
 
   extension/
-    ├─ blockchain.js                   (Integration module)
+    ├─ blockchain.js                   (Blockchain integration)
+    ├─ ipfs.js                         (Storacha IPFS integration)
     ├─ popup.js                        (Logging logic)
     └─ popup.html                      (UI)
 
 ┌──────────────────────────────────────────────────────────────┐
-│ 🎯 VERIFICATION EXAMPLE                                       │
+│ 🎯 VERIFICATION & RECOVERY EXAMPLE                            │
 └──────────────────────────────────────────────────────────────┘
 
+  VERIFICATION:
   1. Save password → generates hash (e.g., 0xabc123...)
-  2. Hash logged to blockchain at timestamp T1
+  2. Hash + CID logged to blockchain at timestamp T1
   3. Later: load vault → compute hash again
   4. Fetch blockchain log → compare hashes
   5. Match = ✅ Vault authentic
      Mismatch = ❌ Vault tampered!
 
+  RECOVERY (from IPFS):
+  1. Lost device? Install BlockPass on new device
+  2. Click "📥 Restore from IPFS"
+  3. Extension fetches latest CID from blockchain
+  4. Downloads encrypted vault from Pinata
+  5. Enter 12-word mnemonic → Vault decrypted!
+  6. All passwords restored ✅
+
 ┌──────────────────────────────────────────────────────────────┐
 │ 💡 PRO TIPS                                                   │
 └──────────────────────────────────────────────────────────────┘
 
+  BLOCKCHAIN:
   • Keep Ganache running while using BlockPass
   • Each save creates a new blockchain transaction
   • View full audit trail in Settings → View Audit History
   • Console (F12) shows detailed blockchain activity
   • Transaction history visible in Ganache "Transactions" tab
 
+  IPFS BACKUP (Pinata):
+  • Enable IPFS for automatic vault recovery capability
+  • Write down 12-word mnemonic on PAPER (not digital)
+  • Test recovery flow immediately after setup
+  • Monitor last backup time in Settings
+  • View uploads at: https://app.pinata.cloud/
+  • 1GB FREE = tens of thousands of backups!
+
 ┌──────────────────────────────────────────────────────────────┐
 │ 📚 DOCUMENTATION                                              │
 └──────────────────────────────────────────────────────────────┘
 
-  • BLOCKCHAIN-SETUP-GUIDE.md     (Full setup instructions)
-  • BLOCKCHAIN-IMPLEMENTATION.md  (Technical details)
+  • PINATA-SETUP-GUIDE.md         (IPFS backup setup - START HERE!)
+  • BLOCKCHAIN-SETUP-GUIDE.md     (Full blockchain setup)
+  • DEPLOYMENT-OPTIONS.md         (Hardhat vs Ganache)
   • Contract: blockchain/contracts/VaultAudit.sol
 
 ┌──────────────────────────────────────────────────────────────┐
@@ -208,7 +262,8 @@
   Then copy the contract address and configure in extension!
 
 ╔══════════════════════════════════════════════════════════════╗
-║  🎉 READY TO AUDIT YOUR VAULT ON THE BLOCKCHAIN!  🎉         ║
+║  🎉 READY FOR BLOCKCHAIN + IPFS DECENTRALIZED BACKUP! 🎉     ║
 ║                                                               ║
+║  📚 For IPFS setup, see PINATA-SETUP-GUIDE.md (5 min)        ║
 ║  📚 For detailed setup options, see DEPLOYMENT-OPTIONS.md    ║
 ╚══════════════════════════════════════════════════════════════╝
