@@ -367,6 +367,183 @@ async function decryptUnlockToken(tokenObject, pin) {
     return JSON.parse(tokenDataString);
 }
 
+// ===== WEBAUTHN BIOMETRIC AUTHENTICATION =====
+
+/**
+ * Check if WebAuthn is supported in the browser
+ * @returns {boolean}
+ */
+function isBiometricSupported() {
+    return window.PublicKeyCredential !== undefined && 
+           navigator.credentials !== undefined;
+}
+
+/**
+ * Register biometric credential for the user
+ * Creates a WebAuthn credential tied to device biometric (fingerprint/face)
+ * @param {string} username - User identifier
+ * @returns {Promise<{success: boolean, credentialId?: string, error?: string}>}
+ */
+async function registerBiometric(username) {
+    if (!isBiometricSupported()) {
+        return { success: false, error: 'Biometric authentication not supported in this browser' };
+    }
+
+    try {
+        // Generate challenge (random bytes)
+        const challenge = new Uint8Array(32);
+        window.crypto.getRandomValues(challenge);
+
+        // Generate user ID
+        const userId = new Uint8Array(16);
+        window.crypto.getRandomValues(userId);
+
+        // Create credential options
+        const publicKeyOptions = {
+            challenge: challenge,
+            rp: {
+                name: "BlockPass Password Manager",
+                id: window.location.hostname || "blockpass.local"
+            },
+            user: {
+                id: userId,
+                name: username,
+                displayName: username
+            },
+            pubKeyCredParams: [
+                { alg: -7, type: "public-key" },  // ES256 (recommended)
+                { alg: -257, type: "public-key" } // RS256 (fallback)
+            ],
+            authenticatorSelection: {
+                authenticatorAttachment: "platform", // Use device biometric (not external key)
+                userVerification: "required",        // Require biometric verification
+                requireResidentKey: false            // Don't require resident key
+            },
+            timeout: 60000, // 60 seconds
+            attestation: "none"
+        };
+
+        console.log('🔐 Requesting biometric registration...');
+        
+        // Create credential
+        const credential = await navigator.credentials.create({
+            publicKey: publicKeyOptions
+        });
+
+        if (!credential) {
+            return { success: false, error: 'Biometric registration cancelled' };
+        }
+
+        // Convert credential ID to base64 for storage
+        const credentialId = arrayBufferToBase64(credential.rawId);
+        const challengeBase64 = arrayBufferToBase64(challenge);
+
+        console.log('✅ Biometric credential registered');
+
+        return {
+            success: true,
+            credentialId: credentialId,
+            challenge: challengeBase64,
+            userId: arrayBufferToBase64(userId)
+        };
+
+    } catch (error) {
+        console.error('❌ Biometric registration error:', error);
+        return { 
+            success: false, 
+            error: error.message || 'Biometric registration failed' 
+        };
+    }
+}
+
+/**
+ * Authenticate using biometric credential
+ * Verifies fingerprint/face and returns success status
+ * @param {string} credentialIdBase64 - Stored credential ID (base64)
+ * @param {string} challengeBase64 - Stored challenge (base64)
+ * @returns {Promise<{success: boolean, error?: string}>}
+ */
+async function authenticateBiometric(credentialIdBase64, challengeBase64) {
+    if (!isBiometricSupported()) {
+        return { success: false, error: 'Biometric authentication not supported' };
+    }
+
+    try {
+        // Convert stored credential ID back to ArrayBuffer
+        const credentialId = base64ToArrayBuffer(credentialIdBase64);
+        const challenge = base64ToArrayBuffer(challengeBase64);
+
+        // Authentication options
+        const publicKeyOptions = {
+            challenge: challenge,
+            allowCredentials: [{
+                id: credentialId,
+                type: "public-key",
+                transports: ["internal"] // Platform authenticator
+            }],
+            userVerification: "required", // Require biometric
+            timeout: 60000 // 60 seconds
+        };
+
+        console.log('👆 Requesting biometric authentication...');
+
+        // Get assertion (authenticate)
+        const assertion = await navigator.credentials.get({
+            publicKey: publicKeyOptions
+        });
+
+        if (!assertion) {
+            return { success: false, error: 'Biometric authentication cancelled' };
+        }
+
+        console.log('✅ Biometric authentication successful');
+
+        return { success: true };
+
+    } catch (error) {
+        console.error('❌ Biometric authentication error:', error);
+        
+        // Provide user-friendly error messages
+        let errorMessage = 'Biometric authentication failed';
+        if (error.name === 'NotAllowedError') {
+            errorMessage = 'Biometric authentication cancelled or not allowed';
+        } else if (error.name === 'InvalidStateError') {
+            errorMessage = 'Biometric credential not found. Please use PIN or recovery phrase.';
+        } else if (error.name === 'NotSupportedError') {
+            errorMessage = 'Biometric authentication not supported on this device';
+        }
+
+        return { 
+            success: false, 
+            error: errorMessage
+        };
+    }
+}
+
+/**
+ * Helper: Convert ArrayBuffer to base64 string
+ */
+function arrayBufferToBase64(buffer) {
+    const bytes = new Uint8Array(buffer);
+    let binary = '';
+    for (let i = 0; i < bytes.length; i++) {
+        binary += String.fromCharCode(bytes[i]);
+    }
+    return btoa(binary);
+}
+
+/**
+ * Helper: Convert base64 string to ArrayBuffer
+ */
+function base64ToArrayBuffer(base64) {
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+        bytes[i] = binary.charCodeAt(i);
+    }
+    return bytes.buffer;
+}
+
 // Export functions
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
@@ -383,6 +560,9 @@ if (typeof module !== 'undefined' && module.exports) {
         deriveKeyFingerprint,
         deriveUnlockKey,
         createUnlockToken,
-        decryptUnlockToken
+        decryptUnlockToken,
+        isBiometricSupported,
+        registerBiometric,
+        authenticateBiometric
     };
 }

@@ -29,16 +29,25 @@
         <div class="logo-container">
             <div class="logo">🔓</div>
             <h1 class="app-name">Welcome Back</h1>
-            <p class="tagline">Enter your PIN to unlock your vault</p>
+            <p class="tagline">Unlock your vault</p>
         </div>
 
         <div class="form-container">
-            <div class="form-group">
-                <label>Enter PIN</label>
-                <input type="password" id="quick-unlock-pin" placeholder="Enter your 6-digit PIN" class="input-field" maxlength="6" inputmode="numeric">
+            <!-- Biometric Unlock Button -->
+            <button class="btn btn-primary" id="biometric-unlock-btn" style="display: none; margin-bottom: 1rem;">
+                👆 Unlock with Biometric
+            </button>
+
+            <!-- PIN Unlock Section -->
+            <div id="pin-unlock-section">
+                <div class="form-group">
+                    <label>Enter PIN</label>
+                    <input type="password" id="quick-unlock-pin" placeholder="Enter your 6-digit PIN" class="input-field" maxlength="6" inputmode="numeric">
+                </div>
+
+                <button class="btn btn-primary" id="quick-unlock-btn">🔓 Unlock Vault</button>
             </div>
 
-            <button class="btn btn-primary" id="quick-unlock-btn">🔓 Unlock Vault</button>
             <button class="btn btn-secondary btn-small" id="use-recovery-phrase-btn">Use Recovery Phrase Instead</button>
             <button class="btn btn-danger btn-small" id="logout-clear-session-btn">🚪 Clear Session & Logout</button>
         </div>

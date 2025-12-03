@@ -10,7 +10,11 @@ let vault = {
     auditEnabled: false,
     theme: 'dark',
     salt: '', // For key derivation
-    sessionTimeout: 15 // Timeout in minutes (5, 15, 30, or 0 for never)
+    sessionTimeout: 15, // Timeout in minutes (5, 15, 30, or 0 for never)
+    // Biometric authentication data
+    biometricCredentialId: '', // WebAuthn credential ID
+    biometricChallenge: '',    // Challenge for authentication
+    biometricUserId: ''         // User ID for WebAuthn
 };
 
 let currentPasswordId = null;
@@ -370,17 +374,51 @@ document.getElementById('continue-dashboard-btn')?.addEventListener('click', asy
         }
         
         vault.pin = pin;
+    } else if (vault.authMethod === 'biometric') {
+        // Register biometric credential
+        if (typeof registerBiometric !== 'function') {
+            alert('Biometric authentication is not available. Please use PIN instead.');
+            return;
+        }
+        
+        console.log('Registering biometric credential...');
+        const result = await registerBiometric(vault.username);
+        
+        if (!result.success) {
+            alert(`Biometric registration failed: ${result.error}\n\nPlease use PIN authentication instead.`);
+            // Switch to PIN mode
+            vault.authMethod = 'pin';
+            document.querySelector('input[value="pin"]').checked = true;
+            document.getElementById('pin-setup').style.display = 'block';
+            return;
+        }
+        
+        // Store biometric credential data
+        vault.biometricCredentialId = result.credentialId;
+        vault.biometricChallenge = result.challenge;
+        vault.biometricUserId = result.userId;
+        
+        console.log('✅ Biometric credential registered successfully');
     }
     
     // Save vault to storage
     await saveVault('vault_created');
     
-    // Create and store unlock token for quick access
+    // Create and store unlock token for quick access (PIN only)
     if (vault.pin && vault.mnemonic && vault.salt) {
         try {
             const unlockToken = await createUnlockToken(vault.mnemonic, vault.salt, vault.pin);
             await storageSet({ 'blockpass-unlock-token': unlockToken });
             console.log('Unlock token created and stored');
+        } catch (error) {
+            console.error('Error creating unlock token:', error);
+        }
+    } else if (vault.authMethod === 'biometric') {
+        // For biometric, create unlock token with empty PIN (biometric will verify instead)
+        try {
+            const unlockToken = await createUnlockToken(vault.mnemonic, vault.salt, '');
+            await storageSet({ 'blockpass-unlock-token': unlockToken });
+            console.log('Unlock token created for biometric auth');
         } catch (error) {
             console.error('Error creating unlock token:', error);
         }
@@ -448,6 +486,85 @@ document.getElementById('recover-vault-submit-btn')?.addEventListener('click', a
 
 // ===== QUICK UNLOCK (PIN/BIOMETRIC) =====
 
+// Biometric Unlock Handler
+document.getElementById('biometric-unlock-btn')?.addEventListener('click', async () => {
+    // Check if currently locked out
+    const lockout = checkPinLockout();
+    if (lockout.locked) {
+        alert(`Too many failed attempts. Please wait ${lockout.remainingTime} seconds before trying again.`);
+        return;
+    }
+    
+    try {
+        // Get stored unlock token
+        const result = await storageGet(['blockpass-unlock-token']);
+        
+        if (!result || !result['blockpass-unlock-token']) {
+            alert('No unlock token found. Please use your recovery phrase.');
+            showScreen('recover-vault-screen');
+            return;
+        }
+        
+        // Verify biometric authentication
+        if (!vault.biometricCredentialId || !vault.biometricChallenge) {
+            alert('Biometric authentication not configured. Please use your recovery phrase.');
+            showScreen('recover-vault-screen');
+            return;
+        }
+        
+        const authResult = await authenticateBiometric(vault.biometricCredentialId, vault.biometricChallenge);
+        
+        if (!authResult.success) {
+            const severeFailure = handleFailedPinAttempt();
+            
+            if (!severeFailure) {
+                alert(authResult.error || 'Biometric authentication failed. Please try again or use your recovery phrase.');
+            }
+            return;
+        }
+        
+        // Decrypt unlock token using biometric challenge
+        const tokenData = await decryptUnlockToken(result['blockpass-unlock-token'], vault.biometricChallenge);
+        
+        // Restore vault credentials
+        vault.mnemonic = tokenData.mnemonic;
+        vault.salt = tokenData.vaultSalt;
+        
+        // Load the vault
+        const loaded = await loadVault();
+        
+        if (!loaded) {
+            alert('Failed to load vault. Your data may be corrupted.');
+            return;
+        }
+        
+        // Success! Reset failed attempts and start session
+        resetPinAttempts();
+        sessionActive = true;
+        
+        document.getElementById('username-display').textContent = vault.username || 'User';
+        showScreen('dashboard-screen');
+        renderPasswordList();
+        
+        // Start activity tracking for session timeout
+        startActivityTracking();
+        
+        // Check for pending password save from content script
+        checkPendingSave();
+        
+    } catch (error) {
+        console.error('Error during biometric unlock:', error);
+        
+        // Handle failed attempt
+        const severeFailure = handleFailedPinAttempt();
+        
+        if (!severeFailure) {
+            alert('Biometric authentication failed. Please try again or use your recovery phrase.');
+        }
+    }
+});
+
+// PIN Unlock Handler
 document.getElementById('quick-unlock-btn')?.addEventListener('click', async () => {
     const pin = document.getElementById('quick-unlock-pin').value.trim();
     
@@ -559,6 +676,18 @@ document.getElementById('settings-btn')?.addEventListener('click', async () => {
             document.getElementById('blockchain-private-key-input').value = bc.privateKey;
         }
         document.getElementById('audit-toggle').checked = bc.enabled || false;
+    }
+    
+    // Load and display latest audit log
+    if (typeof getLatestAuditLog === 'function') {
+        try {
+            const latestLog = await getLatestAuditLog();
+            if (latestLog && latestLog.hash) {
+                updateAuditInfo(latestLog.hash, latestLog.timestamp.toLocaleString());
+            }
+        } catch (error) {
+            console.error('Error loading latest audit log:', error);
+        }
     }
     
     // Update IPFS status
@@ -1027,10 +1156,34 @@ document.getElementById('theme-toggle')?.addEventListener('change', async (e) =>
 
 // Audit toggle
 document.getElementById('audit-toggle')?.addEventListener('change', async (e) => {
-    vault.auditEnabled = e.target.checked;
-    await saveVault('settings_updated');
+    const isEnabled = e.target.checked;
+    vault.auditEnabled = isEnabled;
     
-    // Update blockchain status
+    // Actually enable or disable blockchain audit
+    if (isEnabled) {
+        // Get stored config
+        const storage = await storageGet(['blockchain-config']);
+        if (storage['blockchain-config']) {
+            const bc = storage['blockchain-config'];
+            if (bc.contractAddress && bc.privateKey && typeof enableBlockchainAudit === 'function') {
+                enableBlockchainAudit(bc.contractAddress, bc.privateKey);
+            } else {
+                alert('Please configure blockchain settings first');
+                e.target.checked = false;
+                return;
+            }
+        } else {
+            alert('Please configure blockchain settings first');
+            e.target.checked = false;
+            return;
+        }
+    } else {
+        if (typeof disableBlockchainAudit === 'function') {
+            disableBlockchainAudit();
+        }
+    }
+    
+    await saveVault('settings_updated');
     updateBlockchainStatus();
 });
 
@@ -1160,7 +1313,33 @@ document.getElementById('toggle-ipfs-config-btn')?.addEventListener('click', () 
 
 // IPFS toggle
 document.getElementById('ipfs-toggle')?.addEventListener('change', async (e) => {
-    vault.ipfsEnabled = e.target.checked;
+    const isEnabled = e.target.checked;
+    vault.ipfsEnabled = isEnabled;
+    
+    // Actually enable or disable IPFS backup
+    if (isEnabled) {
+        // Get stored config
+        const storage = await storageGet(['ipfs-config']);
+        if (storage['ipfs-config']) {
+            const ic = storage['ipfs-config'];
+            if (ic.pinataJWT && typeof enableIPFSBackup === 'function') {
+                await enableIPFSBackup(ic.pinataJWT);
+            } else {
+                alert('Please configure IPFS settings first');
+                e.target.checked = false;
+                return;
+            }
+        } else {
+            alert('Please configure IPFS settings first');
+            e.target.checked = false;
+            return;
+        }
+    } else {
+        if (typeof disableIPFSBackup === 'function') {
+            await disableIPFSBackup();
+        }
+    }
+    
     await saveVault('settings_updated');
     updateIPFSStatus();
 });
@@ -1876,18 +2055,24 @@ document.addEventListener('DOMContentLoaded', async () => {
         // Restore blockchain config if exists
         if (storage['blockchain-config']) {
             const bc = storage['blockchain-config'];
-            if (bc.contractAddress && bc.privateKey && typeof enableBlockchainAudit === 'function') {
+            if (bc.enabled && bc.contractAddress && bc.privateKey && typeof enableBlockchainAudit === 'function') {
                 enableBlockchainAudit(bc.contractAddress, bc.privateKey);
                 console.log('✅ Blockchain config restored from storage');
+            } else if (!bc.enabled && typeof disableBlockchainAudit === 'function') {
+                disableBlockchainAudit();
+                console.log('⚠️ Blockchain audit disabled from storage');
             }
         }
         
         // Restore IPFS config if exists
         if (storage['ipfs-config']) {
             const ic = storage['ipfs-config'];
-            if (ic.pinataJWT && typeof enableIPFSBackup === 'function') {
+            if (ic.enabled && ic.pinataJWT && typeof enableIPFSBackup === 'function') {
                 await enableIPFSBackup(ic.pinataJWT);
                 console.log('✅ IPFS config restored from storage');
+            } else if (!ic.enabled && typeof disableIPFSBackup === 'function') {
+                await disableIPFSBackup();
+                console.log('⚠️ IPFS backup disabled from storage');
             }
         }
         
@@ -1900,6 +2085,32 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (hasVault && hasUnlockToken) {
             // Vault exists with unlock token - show quick unlock screen
             console.log('Vault found with unlock token. Showing quick unlock screen.');
+            
+            // Load vault data to determine auth method
+            const vaultData = storage['blockpass-vault'];
+            if (vaultData) {
+                // Restore vault metadata
+                vault.username = vaultData.username;
+                vault.authMethod = vaultData.authMethod;
+                vault.biometricCredentialId = vaultData.biometricCredentialId;
+                vault.biometricChallenge = vaultData.biometricChallenge;
+                vault.biometricUserId = vaultData.biometricUserId;
+                
+                // Show/hide UI elements based on auth method
+                const biometricBtn = document.getElementById('biometric-unlock-btn');
+                const pinSection = document.getElementById('pin-unlock-section');
+                
+                if (vault.authMethod === 'biometric' && vault.biometricCredentialId) {
+                    // Show biometric button, hide PIN section
+                    if (biometricBtn) biometricBtn.style.display = 'block';
+                    if (pinSection) pinSection.style.display = 'none';
+                } else {
+                    // Show PIN section, hide biometric button
+                    if (biometricBtn) biometricBtn.style.display = 'none';
+                    if (pinSection) pinSection.style.display = 'block';
+                }
+            }
+            
             showScreen('quick-unlock-screen');
             
             // Check for pending password save after unlock

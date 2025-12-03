@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "BlockPass - Blockchain Password Manager",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Secure password manager with blockchain verification, encrypted storage, and LAN backup support.",
   "author": "Your Name",
   "icons": {

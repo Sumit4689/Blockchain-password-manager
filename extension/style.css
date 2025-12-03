@@ -359,6 +359,7 @@ body {
     font-size: 0.9375rem;
     transition: all var(--transition-base);
     backdrop-filter: blur(10px);
+    margin-bottom: 10px;
 }
 
 .input-field:focus {
@@ -897,6 +898,7 @@ textarea.input-field {
     background: var(--bg-secondary);
     border-radius: var(--radius-md);
     border: 1px solid var(--border-color);
+    margin-bottom: 10px;
 }
 
 .info-text {
@@ -954,7 +956,9 @@ textarea.input-field {
     border-radius: var(--radius-xl);
     padding: var(--spacing-xl);
     max-width: 90%;
+    max-height: 90%;
     width: 360px;
+    overflow-y: auto;
     box-shadow: var(--shadow-lg);
     animation: slideUp var(--transition-base) ease;
 }
